@@ -9,7 +9,7 @@ def get_mime_url(wiki_url: str, MIME_type: str, offset: int, amount: int) -> str
 
 def download_media(
     wiki_url: str, MIME_type: str, file_callback: callable,
-    offset: int = 0, amount: int = 5000, *callback_arguments
+    offset: int = 0, amount: int = 100, *callback_arguments
 ) -> int:
     # Return value, -1 means the function didn't even go inside the loop
     downloaded_file_count = -1
@@ -19,14 +19,25 @@ def download_media(
 
     # Make request look like it comes from Postman, some wikis block requests from a suspicious user agent
     headers = {"User-Agent": "PostmanRuntime/7.43.0"}
-    mime_url = get_mime_url(wiki_url, MIME_type, offset, amount)
-    try:
-        request = requests.get(mime_url, headers=headers)
-    except:
-        raise ValueError("Invalid URL or no internet")
 
-    request_result = str(request.content)
-    for line in re.findall("<li>.+?(?=>download</a>)>download</a>", request_result):
+    # A MIME Search page can contain a maximum of 5000 files
+    results_list = []
+    for i in range(int(amount / 5000) + 1):
+        url_offset = offset + 5000 * i
+        url_amount = min(amount, 5000)
+        amount -= url_amount
+        mime_url = get_mime_url(wiki_url, MIME_type, url_offset, url_amount)
+        try:
+            request = requests.get(mime_url, headers=headers)
+        except:
+            raise ValueError("Invalid URL or no internet")
+
+        results_list.append(str(request.content))
+
+    mime_pages = "".join(results_list)
+    del results_list
+
+    for line in re.findall("<li>.+?(?=>download</a>)>download</a>", mime_pages):
         file_url = re.findall('[^"]*/[^"]*', line)[0]
         if not re.search("https://", file_url):
             if re.search("//", file_url):
@@ -156,14 +167,10 @@ def main():
 
     downloaded_file_count = 0
     try:
-        for i in range(int(amount / 5000) + 1):
-            operation_offset = offset + 5000 * i
-            operation_amount = min(amount, 5000)
-            amount -= operation_amount
-            downloaded_file_count += download_media(
-                WIKI_URL, MIME_TYPE, download_media_file,
-                operation_offset, operation_amount, output_directory, verbose,
-            )
+        downloaded_file_count += download_media(
+            WIKI_URL, MIME_TYPE, download_media_file,
+            offset, amount, output_directory, verbose,
+        )
     except ValueError:
         print("Error: Invalid URL or no internet. \nQuitting...")
         if not len(sys.argv) > 1:
